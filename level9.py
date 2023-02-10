@@ -40,6 +40,11 @@ import time
 import logging
 import argparse
 
+# For colours in DOS
+import os
+from ctypes.wintypes import WORD
+os.system('color')
+
 ###############################################################################
 # Load the version1 file configuration information
 ###############################################################################
@@ -293,6 +298,39 @@ def _process_hash_commands(data, pc, userInput):
                 address = _getAddrForMessageN(data, int(number, 16))
                 _printMessage(data, address)                
                 print("")
+
+        # Print the possible exits from a given location
+        case ['#exits', number]:
+            if(number.isdigit()):
+                exitPointer = _find_next_location(exitsAddr, data, int(number))
+            elif(isValidHex(number)):
+                exitPointer = _find_next_location(exitsAddr, data, int(number,16))
+
+            while(data[exitPointer]):
+                locationData = (data[exitPointer+1]*256)+data[exitPointer]
+                endLocation=data[exitPointer+1]
+                direction = data[exitPointer] & 0b00001111
+                directionStr=''
+                # Find the first dictionary entry that represents the direction
+                for word in vm_dictionary.keys():
+                    code=vm_dictionary[word]
+                    if (code == direction):
+                        directionStr=word
+                        break
+                    
+                flags = (data[exitPointer] & 0b01110000) >> 4
+                flagStr = ""
+                if (flags & 0x1): flagStr += "inverse "
+                if (flags & 0x2): flagStr += "hide "
+                if (flags & 0x4): flagStr += "door"
+                flagStr = flagStr.rstrip()
+
+                print (f"{exitPointer:#06x} {locationData:#06x} {data[exitPointer]:#010b} {directionStr} ({direction:#03x}) to {endLocation+100:#04x} ({endLocation:#04x}) : {flags:#05b} ({flags:#03x}) ({flagStr})")
+
+                if(data[exitPointer] & 0b10000000):
+                    break
+        
+                exitPointer += 2
 
         case other:
             print('Invalid command')
@@ -1648,6 +1686,9 @@ parserGroup3.add_argument('-a', '--autoGame', required=False, action='store_true
 # Not used so much any more but was during development of this
 parser.add_argument('--logging', type=str, choices=['info','debug'],required=False)
 
+parser.add_argument('--dict', type=str, required=False)
+parser.add_argument('--acode', type=str, required=False)
+
 # Parse the arguments
 args = parser.parse_args()  
 
@@ -1692,10 +1733,35 @@ exitsAddr            = aCodeStartAddr + v1Configuration[game]['offsets']['exitsO
 messagesStartAddr    = aCodeStartAddr + v1Configuration[game]['offsets']['messagesOffset']
 commonFragmentsAddr  = aCodeStartAddr + v1Configuration[game]['offsets']['fragmentsOffset']
 
-# print(hex(dictionaryAddr))
-# print(hex(exitsAddr))
-# print(hex(messagesStartAddr))
-# print(hex(commonFragmentsAddr))
+print(hex(dictionaryAddr))
+print(hex(exitsAddr))
+print(hex(messagesStartAddr))
+print(hex(commonFragmentsAddr))
+
+# Injection code
+if(args.dict):
+    filename=args.dict
+    with open(filename,'rb') as dataFile:
+        patch = bytearray(dataFile.read())
+        dataFile.close()
+    offset=dictionaryAddr
+    for byte in patch:
+        targetByte = data[offset]
+        print (f"*** PATCH DICT {offset:#06x} {targetByte:#04x} -> {byte:#04x}")
+        data[offset]=byte
+        offset += 1
+
+if(args.acode):
+    filename=args.acode
+    with open(filename,'rb') as dataFile:
+        patch = bytearray(dataFile.read())
+        dataFile.close()
+    offset=aCodeStartAddr
+    for byte in patch:
+        targetByte = data[offset]
+        print (f"*** PATCH A-CODE {offset:#06x} {targetByte:#04x} -> {byte:#04x}")
+        data[offset]=byte
+        offset += 1
 
 # Set the program counter to the start of the A-Code
 pc = aCodeStartAddr
